@@ -198,4 +198,39 @@ torch::Tensor launch_hybrid_gqa_attn(
     return out;
 }
 
+torch::Tensor launch_hybrid_gqa_attn_pos_buf(
+    torch::Tensor q, torch::Tensor k, torch::Tensor v, c10::optional<torch::Tensor> gate,
+    torch::Tensor k_cache, torch::Tensor v_cache, c10::optional<torch::Tensor> rel_bias,
+    torch::Tensor attn_sink, torch::Tensor pos_buf, bool is_swa, int64_t window_size,
+    double qk_clip_thresh, double rms_eps, double log_n_floor, double log_alpha
+) {
+    c10::cuda::CUDAGuard guard(q.device());
+    int M = q.size(0);
+    int max_slots = k_cache.size(0);
+    auto stream = at::cuda::getCurrentCUDAStream();
+    const int32_t* pos_ptr = pos_buf.data_ptr<int32_t>();
+
+    qkv_norm_cache_write_kernel<<<dim3(M, 32), 128, 0, stream>>>(
+        reinterpret_cast<half*>(q.data_ptr<at::Half>()),
+        reinterpret_cast<const half*>(k.data_ptr<at::Half>()),
+        reinterpret_cast<const half*>(v.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(k_cache.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(v_cache.data_ptr<at::Half>()),
+        0, pos_ptr, M, max_slots, is_swa, float(qk_clip_thresh), float(rms_eps)
+    );
+
+    auto out = torch::empty_like(q);
+    hybrid_gqa_attn_sm75_kernel<<<dim3(24, M), 128, 0, stream>>>(
+        reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
+        gate.has_value() ? reinterpret_cast<const half*>(gate->data_ptr<at::Half>()) : nullptr,
+        reinterpret_cast<const half*>(k_cache.data_ptr<at::Half>()),
+        reinterpret_cast<const half*>(v_cache.data_ptr<at::Half>()),
+        rel_bias.has_value() ? reinterpret_cast<const half*>(rel_bias->data_ptr<at::Half>()) : nullptr,
+        attn_sink.data_ptr<float>(),
+        reinterpret_cast<half*>(out.data_ptr<at::Half>()),
+        0, pos_ptr, M, max_slots, is_swa, int(window_size), float(log_n_floor), float(log_alpha)
+    );
+    return out;
+}
+
 } // namespace loopt4
