@@ -57,3 +57,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("hybrid_gqa_attn",           &loopt4::launch_hybrid_gqa_attn, "Hybrid SWA-1024 / Global GQA");
     m.def("enable_p2p_access",         &loopt4::enable_p2p_access, "Enable CUDA P2P between 2xT4");
 }
+launch_hybrid_gqa_attn_pos_buf {
+    m.def("hybrid_gqa_attn_pos_buf", &loopt4::launch_hybrid_gqa_attn_pos_buf, "CUDA-Graph-safe Hybrid GQA");
+}
