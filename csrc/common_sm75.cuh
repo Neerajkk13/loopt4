@@ -16,6 +16,18 @@ __device__ __forceinline__ float init_e2m1_lane_lut() {
     return kTable[threadIdx.x & 15];
 }
 
+// Branchless, shuffle-free OCP NVFP4 E2M1 -> FP32 bit-twiddle for sm_75.
+// Exact for all 16 values: +/-{0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0}.
+// Zero __shfl_sync latency and zero warp-lockstep padding required.
+__device__ __forceinline__ float e2m1_to_float_alu(uint32_t n) {
+    uint32_t s   = (n & 8u) << 28;
+    uint32_t mag = n & 7u;
+    uint32_t f32 = (mag <= 1u)
+        ? (mag ? 0x3F000000u : 0u)
+        : ((((mag >> 1) + 126u) << 23) | ((mag & 1u) << 22));
+    return __uint_as_float(s | f32);
+}
+
 __device__ __forceinline__ float e2m1_lut_lookup(uint32_t nibble, float lane_lut) {
     return __shfl_sync(0xFFFFFFFFu, lane_lut, nibble & 15u);
 }
